@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: telegram-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: BOT_TOKEN
+        value: your_bot_token_here
+      - key: ADMIN_ID
+        value: 123456789
+      - key: SERVER_URL
+        value: https://your-app-name.onrender.com
+      - key: USE_SUPABASE
+        value: false
+      - key: SUPABASE_URL
+        value: 
+      - key: SUPABASE_KEY
+        value:
